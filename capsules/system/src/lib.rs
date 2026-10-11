@@ -6,6 +6,7 @@
 #![no_std]
 
 pub mod debug_writer;
+pub mod lockdown;
 pub mod process_checker;
 pub mod process_policies;
 pub mod process_printer;

@@ -11,6 +11,7 @@
 #   poc     keeper vault worker   (default; the lockdown PoC apps)
 #   mpu     keeper intruder       (Phase 1 MPU gate)
 #   gpio    keeper gpio_test      (PIO driver test; drives D24 and D25)
+#   reader  keeper reader         (two console readers; exercises receive_abort)
 #
 # libtock-rs apps are linked for fixed addresses. Each app's flash address is
 # where the previous TBF ends, so apps are built in order. Each app gets a
@@ -29,6 +30,7 @@ case "$set_name" in
     poc) apps=(due_keeper due_vault due_worker) ;;
     mpu) apps=(due_keeper due_intruder) ;;
     gpio) apps=(due_keeper due_gpio_test) ;;
+    reader) apps=(due_keeper due_reader) ;;
     *) echo "unknown set: $set_name" >&2; exit 1 ;;
 esac
 

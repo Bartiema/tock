@@ -139,6 +139,7 @@ are 16 KB from `0x20078000`) and writes `test_apps/build/<set>/apps.bin`.
 | `poc`  | keeper, vault, worker      | Lockdown PoC: allowlisted app, secrets, load    |
 | `mpu`  | keeper, intruder           | The intruder writes into the keeper's RAM; the MPU must stop it |
 | `gpio` | keeper, gpio_test          | PIO levels, edges, button and debounce          |
+| `reader` | keeper, reader           | A second console reader next to the process console |
 
 - **keeper**: LED and console heartbeat once a second.
 - **vault**: 32-byte canaries in its stack (S), `.data` (D), heap (H) and a

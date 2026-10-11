@@ -105,12 +105,16 @@ Findings and deviations from the plan
 7. **Process console panic (upstream bug, fixed).** `write_byte` overflowed
    the 300-byte queue when the console was flooded and input kept arriving,
    panicking the kernel.
-8. **RTT console input stalls (open).** Input is not processed while another
-   process floods the console, and in lockdown it stops being processed
-   about 10 s after boot, although the RTT driver keeps consuming the bytes.
-   Likely cause: when a second receiver appears, the UART mux aborts the
-   ongoing read and waits for its callback, but `SeggerRtt::receive_abort`
-   returns `Ok(())` without one, so the mux waits forever. Not fixed yet.
+8. **Process console stops for good (fixed).** After certain commands,
+   including the lockdown console commands, the process console no longer
+   echoed or ran anything; this looked like RTT input stalling. Cause: a
+   zero-length write made the UART mux refuse the transmission, and the
+   process console ignored the error, losing its only transmit buffer with
+   `tx_in_progress` still set. The process console now skips empty writes and
+   takes its buffer back when a transmission is refused. Separately,
+   `SeggerRtt::receive_abort` now follows the UART HIL (returns BUSY and
+   calls back with CANCEL); without that, the mux's aborted read only
+   completed at the next received byte.
 9. **Stale SRAM.** SRAM keeps its contents across resets, and app memory not
    given to any process was never cleared. The board now zeroes all app
    memory at boot.

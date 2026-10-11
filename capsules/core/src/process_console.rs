@@ -1047,8 +1047,14 @@ impl<
     fn write_byte(&self, byte: u8) -> Result<(), ErrorCode> {
         if self.tx_in_progress.get() {
             self.queue_buffer.map(|buf| {
-                buf[self.queue_size.get()] = byte;
-                self.queue_size.set(self.queue_size.get() + 1);
+                // Drop the byte if the queue is full, as `write_bytes` does:
+                // while other console users keep the UART busy, the queue can
+                // fill up (for example with echoed input).
+                let size = self.queue_size.get();
+                if let Some(slot) = buf.get_mut(size) {
+                    *slot = byte;
+                    self.queue_size.set(size + 1);
+                }
             });
             Err(ErrorCode::BUSY)
         } else {

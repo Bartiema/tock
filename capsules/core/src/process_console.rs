@@ -1113,13 +1113,17 @@ impl<
             self.tx_in_progress.set(true);
             self.tx_buffer.take().map(|buffer| {
                 buffer[0] = byte;
-                let _ = self.uart.transmit_buffer(buffer, 1);
+                self.transmit(buffer, 1);
             });
             Ok(())
         }
     }
 
     fn write_bytes(&self, bytes: &[u8]) -> Result<(), ErrorCode> {
+        if bytes.is_empty() {
+            // The UART refuses zero-length transmissions.
+            return Ok(());
+        }
         if self.tx_in_progress.get() {
             self.queue_buffer.map(|buf| {
                 let size = self.queue_size.get();
@@ -1134,9 +1138,19 @@ impl<
                 let len = cmp::min(bytes.len(), buffer.len());
                 // Copy elements of `bytes` into `buffer`
                 (buffer[..len]).copy_from_slice(&bytes[..len]);
-                let _ = self.uart.transmit_buffer(buffer, len);
+                self.transmit(buffer, len);
             });
             Ok(())
+        }
+    }
+
+    /// Start a transmission. If the UART refuses it, take the buffer back and
+    /// mark the console idle, so a refused transmission cannot leave the
+    /// console waiting forever for a callback.
+    fn transmit(&self, buffer: &'static mut [u8], len: usize) {
+        if let Err((_e, buffer)) = self.uart.transmit_buffer(buffer, len) {
+            self.tx_buffer.replace(buffer);
+            self.tx_in_progress.set(false);
         }
     }
 
@@ -1175,7 +1189,7 @@ impl<
                     self.queue_size.set(remaining);
 
                     self.tx_in_progress.set(true);
-                    let _ = self.uart.transmit_buffer(txbuf, txlen);
+                    self.transmit(txbuf, txlen);
                     Ok(txlen)
                 })
             } else {

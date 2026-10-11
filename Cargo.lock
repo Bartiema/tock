@@ -1578,6 +1578,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sam3x"
+version = "0.2.4-dev"
+dependencies = [
+ "cortexm3",
+ "kernel",
+]
+
+[[package]]
 name = "sam4l"
 version = "0.2.4-dev"
 dependencies = [

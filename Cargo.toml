@@ -112,6 +112,7 @@ members = [
     "chips/rp2040",
     "chips/rp2350",
     "chips/rp2xxx",
+    "chips/sam3x",
     "chips/sam4l",
     "chips/segger",
     "chips/sifive",

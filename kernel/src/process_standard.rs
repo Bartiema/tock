@@ -839,6 +839,69 @@ impl<C: Chip, D: 'static + ProcessStandardDebug> Process for ProcessStandard<'_,
         self.state.set(State::Terminated);
     }
 
+    fn zeroize_memory(
+        &self,
+        _cap: &dyn crate::capabilities::ProcessZeroizeCapability,
+    ) -> Result<usize, ErrorCode> {
+        // Only a terminated process is safe to wipe: it will not run, and
+        // `terminate()` has released its grants, so no capsule can reach this
+        // memory through the process any more.
+        if self.get_state() != State::Terminated {
+            return Err(ErrorCode::BUSY);
+        }
+
+        // Everything below the kernel memory break: the process-accessible
+        // memory and the grant region. Above the break are the process
+        // structure (this object), the upcall queue and the grant pointer
+        // table, which the kernel still uses.
+        let start = self.mem_start();
+        let end = self.kernel_memory_break();
+        let len = (end as usize).saturating_sub(start as usize);
+        let base = start.cast_mut();
+
+        // Word writes for the aligned middle, byte writes at the edges.
+        let head = base.align_offset(mem::align_of::<u32>()).min(len);
+        let words = (len - head) / mem::size_of::<u32>();
+        let tail_start = head + words * mem::size_of::<u32>();
+
+        // SAFETY: `[start, end)` lies inside the memory region the kernel
+        // allocated to this process at creation (`kernel_memory_break` never
+        // rises above `mem_start + memory_len`), which is not used by any
+        // other process or the kernel's static data. The process is
+        // terminated and its grants are released, so no live Rust reference
+        // into this range exists. Volatile writes keep the compiler from
+        // removing them.
+        unsafe {
+            for i in 0..head {
+                ptr::write_volatile(base.add(i), 0);
+            }
+            let word_base = base.add(head).cast::<u32>();
+            for i in 0..words {
+                ptr::write_volatile(word_base.add(i), 0);
+            }
+            for i in tail_start..len {
+                ptr::write_volatile(base.add(i), 0);
+            }
+        }
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+
+        // Read back, so a failed or elided write is detected.
+        //
+        // SAFETY: as above; volatile reads of memory just written.
+        let clear = unsafe {
+            (0..head).all(|i| ptr::read_volatile(base.add(i)) == 0)
+                && (0..words).all(|i| ptr::read_volatile(base.add(head).cast::<u32>().add(i)) == 0)
+                && (tail_start..len).all(|i| ptr::read_volatile(base.add(i)) == 0)
+        };
+
+        // The registers saved at the last context switch may hold secrets.
+        self.stored_state.map(|stored_state| {
+            *stored_state = Default::default();
+        });
+
+        if clear { Ok(len) } else { Err(ErrorCode::FAIL) }
+    }
+
     fn get_restart_count(&self) -> usize {
         self.restart_count.get()
     }

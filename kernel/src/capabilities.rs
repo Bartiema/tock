@@ -70,6 +70,18 @@ pub unsafe trait ProcessManagementCapability {}
 /// Capabilities can only be created in trusted crates that can use `unsafe`.
 pub unsafe trait ProcessStartCapability {}
 
+/// The `ProcessZeroizeCapability` allows the holder to overwrite the memory of
+/// a terminated process with zeros.
+///
+/// This is separate from `ProcessManagementCapability` because it writes to
+/// memory the kernel handed to a process. It is meant for code that destroys
+/// a process's secrets, such as a tamper response.
+///
+/// # Safety
+///
+/// Capabilities can only be created in trusted crates that can use `unsafe`.
+pub unsafe trait ProcessZeroizeCapability {}
+
 /// The `MainLoopCapability` capability allows the holder to start executing as
 /// well as manage the main scheduler loop in Tock.
 ///

@@ -512,6 +512,27 @@ pub trait Process {
     /// `None`.
     fn terminate(&self, completion_code: Option<u32>);
 
+    /// Overwrite the memory of a terminated process with zeros.
+    ///
+    /// Zeros everything the process could reach and everything capsules
+    /// stored for it: the process's stack, data and heap, the unused memory
+    /// between them, and its grant region, i.e. the whole process memory
+    /// region below the kernel's own bookkeeping for the process (the process
+    /// structure, upcall queue and grant pointer table at its top). The
+    /// register state saved for the process is reset as well.
+    ///
+    /// The writes are volatile and followed by a compiler fence and a
+    /// read-back check, so they are not optimized away.
+    ///
+    /// Returns the number of bytes zeroed. Returns `Err(ErrorCode::BUSY)` if
+    /// the process is not in the [`Terminated`](State::Terminated) state, as
+    /// a live process or a capsule acting for it could write to the memory
+    /// again, and `Err(ErrorCode::FAIL)` if the read-back check fails.
+    fn zeroize_memory(
+        &self,
+        cap: &dyn crate::capabilities::ProcessZeroizeCapability,
+    ) -> Result<usize, ErrorCode>;
+
     /// Get the completion code if the process has previously terminated.
     ///
     /// ## Returns

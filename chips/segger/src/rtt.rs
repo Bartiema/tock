@@ -220,6 +220,8 @@ pub struct SeggerRtt<'a, A: hil::time::Alarm<'a>> {
     rx_client_buffer: TakeCell<'static, [u8]>,
     rx_cursor: Cell<usize>,
     rx_len: Cell<usize>,
+    /// A receive abort was requested; the next alarm returns the buffer.
+    rx_abort: Cell<bool>,
 }
 
 impl<'a, A: hil::time::Alarm<'a>> SeggerRtt<'a, A> {
@@ -234,6 +236,7 @@ impl<'a, A: hil::time::Alarm<'a>> SeggerRtt<'a, A> {
             rx_client_buffer: TakeCell::empty(),
             rx_cursor: Cell::new(0),
             rx_len: Cell::new(0),
+            rx_abort: Cell::new(false),
         }
     }
 }
@@ -304,6 +307,17 @@ impl<'a, A: hil::time::Alarm<'a>> hil::time::AlarmClient for SeggerRtt<'a, A> {
         });
         self.rx_client.map(|client| {
             self.rx_client_buffer.take().map(|buffer| {
+                if self.rx_abort.take() {
+                    // Return what was received so far, as `receive_abort()`
+                    // promised.
+                    client.received_buffer(
+                        buffer,
+                        self.rx_cursor.get(),
+                        Err(ErrorCode::CANCEL),
+                        uart::Error::Aborted,
+                    );
+                    return;
+                }
                 self.config.map(|config| {
                     let write_position = &config.down_buffer.write_position;
                     let read_position = &config.down_buffer.read_position;
@@ -368,7 +382,21 @@ impl<'a, A: hil::time::Alarm<'a>> uart::Receive<'a> for SeggerRtt<'a, A> {
     }
 
     fn receive_abort(&self) -> Result<(), ErrorCode> {
-        Ok(())
+        if self.rx_abort.get() {
+            // An abort is already under way; its callback is still coming.
+            return Err(ErrorCode::BUSY);
+        }
+        if self.rx_client_buffer.is_none() {
+            // Nothing to abort.
+            return Ok(());
+        }
+        // The callback must not happen within this call, so deliver it from
+        // the alarm. Use the transmit delay: the alarm also completes any
+        // pending transmission, which needs at least that long.
+        self.rx_abort.set(true);
+        let delay = self.alarm.ticks_from_ms(TX_MS_DELAY);
+        self.alarm.set_alarm(self.alarm.now(), delay);
+        Err(ErrorCode::BUSY)
     }
 }
 

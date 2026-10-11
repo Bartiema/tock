@@ -121,6 +121,33 @@ macro_rules! static_buf {
     }};
 }
 
+/// A version of [`static_buf!()`] that places the buffer in a given linker
+/// section.
+///
+/// This lets a board collect buffers that may hold sensitive data, such as
+/// copies of process data in capsule buffers, into one section, so they can be
+/// wiped together. The board's linker script must place the section in RAM,
+/// typically as `NOLOAD`: the buffer is not initialized at boot, and must be
+/// initialized before use as with [`static_buf!()`]. The flag that checks the
+/// buffer is only used once stays in zero-initialized memory.
+///
+/// ```ignore
+/// let buf = static_buf_in_section!(".kernel_secrets", [u8; 64]);
+/// let buf: &'static mut [u8; 64] = buf.write([0; 64]);
+/// ```
+#[macro_export]
+macro_rules! static_buf_in_section {
+    ($section:literal, $T:ty $(,)?) => {{
+        #[cfg_attr(target_os = "none", unsafe(link_section = $section))]
+        static mut BUF: core::mem::MaybeUninit<$T> = core::mem::MaybeUninit::uninit();
+        static mut USED: bool = false;
+
+        $crate::utilities::static_init::static_buf_check_used(&mut USED);
+
+        &mut BUF
+    }};
+}
+
 /// A version of [`static_buf!()`] that adds an exported name to the buffer.
 ///
 /// This creates a static buffer exactly as [`static_buf!()`] does. In general,

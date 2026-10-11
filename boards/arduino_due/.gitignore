@@ -1,0 +1,6 @@
+test_apps/build/
+sram.bin
+__pycache__/
+soak_sram.bin
+soak*.log
+soak*.out

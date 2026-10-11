@@ -12,6 +12,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "arduino_due"
+version = "0.2.4-dev"
+dependencies = [
+ "capsules-core",
+ "capsules-system",
+ "components",
+ "cortexm3",
+ "kernel",
+ "sam3x",
+ "segger",
+ "tock_build_scripts",
+]
+
+[[package]]
 name = "arty_e21"
 version = "0.2.4-dev"
 dependencies = [

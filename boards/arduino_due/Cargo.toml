@@ -1,0 +1,26 @@
+# Licensed under the Apache License, Version 2.0 or the MIT License.
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# Copyright Tock Contributors 2026.
+
+[package]
+name = "arduino_due"
+version.workspace = true
+authors.workspace = true
+build = "../build.rs"
+edition.workspace = true
+
+[dependencies]
+components = { path = "../components" }
+cortexm3 = { path = "../../arch/cortex-m3" }
+kernel = { path = "../../kernel" }
+sam3x = { path = "../../chips/sam3x" }
+segger = { path = "../../chips/segger" }
+
+capsules-core = { path = "../../capsules/core" }
+capsules-system = { path = "../../capsules/system" }
+
+[build-dependencies]
+tock_build_scripts = { path = "../build_scripts" }
+
+[lints]
+workspace = true

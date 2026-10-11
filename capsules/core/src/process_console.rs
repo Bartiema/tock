@@ -16,6 +16,7 @@ use kernel::capabilities::ProcessManagementCapability;
 use kernel::capabilities::ProcessStartCapability;
 use kernel::hil::time::ConvertTicks;
 use kernel::utilities::cells::MapCell;
+use kernel::utilities::cells::OptionalCell;
 use kernel::utilities::cells::TakeCell;
 
 use kernel::ErrorCode;
@@ -45,6 +46,24 @@ pub const DEFAULT_COMMAND_HISTORY_LEN: usize = 10;
 /// displayed in a few different cases.
 const VALID_COMMANDS_STR: &[u8] =
     b"help status list stop start fault boot terminate process kernel reset panic console-start console-stop\r\n";
+
+/// Lets another component add commands to the process console and veto
+/// starting processes from it.
+///
+/// For example, a tamper response can refuse to restart processes it has
+/// terminated while it is active.
+pub trait ProcessConsoleHooks {
+    /// Whether the process named `name` may be started or resumed from the
+    /// console now.
+    fn process_start_allowed(&self, name: &str) -> bool;
+
+    /// Handle a command the console does not know. Returns the reply to
+    /// print, or `None` if the command is not handled here either.
+    fn command(&self, command: &str) -> Option<&'static str>;
+
+    /// Extra commands, listed by `help`. Should end with "\r\n".
+    fn help(&self) -> &'static str;
+}
 
 /// Escape character for ANSI escape sequences.
 const ESC: u8 = b'\x1B';
@@ -274,6 +293,9 @@ pub struct ProcessConsole<
     /// This capsule needs to use potentially dangerous APIs related to
     /// processes, and requires a capability to access those APIs.
     capability: C,
+
+    /// Optional extra commands and restrictions.
+    hooks: OptionalCell<&'a dyn ProcessConsoleHooks>,
 }
 
 #[derive(Copy, Clone)]
@@ -478,7 +500,23 @@ impl<
             kernel_addresses,
             reset_function,
             capability,
+            hooks: OptionalCell::empty(),
         }
+    }
+
+    /// Add commands to the console and restrict starting processes.
+    pub fn set_hooks(&self, hooks: &'a dyn ProcessConsoleHooks) {
+        self.hooks.set(hooks);
+    }
+
+    fn start_allowed(&self, name: &str) -> bool {
+        let allowed = self
+            .hooks
+            .map_or(true, |hooks| hooks.process_start_allowed(name));
+        if !allowed {
+            let _ = self.write_bytes(b"Refused: starting processes is blocked now.\r\n");
+        }
+        allowed
     }
 
     /// Start the process console listening for user commands.
@@ -789,30 +827,35 @@ impl<
                             let _ = self.write_bytes(b"Welcome to the process console.\r\n");
                             let _ = self.write_bytes(b"Valid commands are: ");
                             let _ = self.write_bytes(VALID_COMMANDS_STR);
+                            self.hooks.map(|hooks| {
+                                let _ = self.write_bytes(hooks.help().as_bytes());
+                            });
                         } else if clean_str.starts_with("console-stop") {
                             let _ = self.write_bytes(b"Disabling the process console.\r\n");
                             let _ = self.write_bytes(b"Run console-start to reactivate.\r\n");
                             self.mode.set(ProcessConsoleState::Hibernating);
                         } else if clean_str.starts_with("start") {
                             let argument = clean_str.split_whitespace().nth(1);
-                            argument.map(|name| {
-                                self.kernel
-                                    .process_each_capability(&self.capability, |proc| {
-                                        let proc_name = proc.get_process_name();
-                                        if proc_name == name {
-                                            proc.resume();
-                                            let mut console_writer = ConsoleWriter::new();
-                                            let _ = write(
-                                                &mut console_writer,
-                                                format_args!("Process {} resumed.\r\n", name),
-                                            );
+                            argument
+                                .filter(|name| self.start_allowed(name))
+                                .map(|name| {
+                                    self.kernel
+                                        .process_each_capability(&self.capability, |proc| {
+                                            let proc_name = proc.get_process_name();
+                                            if proc_name == name {
+                                                proc.resume();
+                                                let mut console_writer = ConsoleWriter::new();
+                                                let _ = write(
+                                                    &mut console_writer,
+                                                    format_args!("Process {} resumed.\r\n", name),
+                                                );
 
-                                            let _ = self.write_bytes(
-                                                &(console_writer.buf)[..console_writer.size],
-                                            );
-                                        }
-                                    });
-                            });
+                                                let _ = self.write_bytes(
+                                                    &(console_writer.buf)[..console_writer.size],
+                                                );
+                                            }
+                                        });
+                                });
                         } else if clean_str.starts_with("stop") {
                             let argument = clean_str.split_whitespace().nth(1);
                             argument.map(|name| {
@@ -881,17 +924,19 @@ impl<
                             });
                         } else if clean_str.starts_with("boot") {
                             let argument = clean_str.split_whitespace().nth(1);
-                            argument.map(|name| {
-                                self.kernel
-                                    .process_each_capability(&self.capability, |proc| {
-                                        let proc_name = proc.get_process_name();
-                                        if proc_name == name
-                                            && proc.get_state() == State::Terminated
-                                        {
-                                            proc.start(&self.capability);
-                                        }
-                                    });
-                            });
+                            argument
+                                .filter(|name| self.start_allowed(name))
+                                .map(|name| {
+                                    self.kernel
+                                        .process_each_capability(&self.capability, |proc| {
+                                            let proc_name = proc.get_process_name();
+                                            if proc_name == name
+                                                && proc.get_state() == State::Terminated
+                                            {
+                                                proc.start(&self.capability);
+                                            }
+                                        });
+                                });
                         } else if clean_str.starts_with("list") {
                             let _ = self
                                 .write_bytes(b" PID    ShortID    Name                Quanta  ");
@@ -1005,9 +1050,16 @@ impl<
                             );
                         } else if clean_str.starts_with("panic") {
                             panic!("Process Console forced a kernel panic.");
+                        } else if let Some(reply) =
+                            self.hooks.and_then(|hooks| hooks.command(clean_str))
+                        {
+                            let _ = self.write_bytes(reply.as_bytes());
                         } else {
                             let _ = self.write_bytes(b"Valid commands are: ");
                             let _ = self.write_bytes(VALID_COMMANDS_STR);
+                            self.hooks.map(|hooks| {
+                                let _ = self.write_bytes(hooks.help().as_bytes());
+                            });
                         }
                     }
                     Err(_e) => {
